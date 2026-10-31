@@ -17,31 +17,56 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y psmisc curl wget
           # Clean up unnecessary toolchains to free disk space (~15GB freed)
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
 
-      - name: Install & Configure ngrok
-        env:
-          NGROK_TOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+      - name: Install ngrok
         run: |
           curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin
-          ngrok config add-authtoken "$NGROK_TOKEN"
 
       - name: Launch Hermes Agent
         run: |
-          # Example Hermes startup command on port 9119
-          # Replace with your actual project start script
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          # Install Python dependencies if requirements.txt exists
+          if [ -f "requirements.txt" ]; then 
+            pip install --no-cache-dir -r requirements.txt
+          fi
+
+          echo "Starting Hermes Agent on port 9119..."
+          # Start your script in background mode
           nohup python main.py --port 9119 > /tmp/hermes.log 2>&1 &
           sleep 5
 
+          # Verify Hermes process started
+          if pgrep -f "python main.py" > /dev/null; then
+            echo "✅ Hermes Agent is running successfully."
+          else
+            echo "⚠️ Warning: Process check failed. Printing startup log:"
+            cat /tmp/hermes.log || true
+          fi
+
       - name: Expose Port 9119 via ngrok & Maintain Session
         env:
+          NGROK_TOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
           NGROK_DOMAIN: "countless-doozy-flashing.ngrok-free.dev"
         run: |
-          echo "Starting ngrok tunnel on port 9119..."
-          ngrok http 9119 --domain="$NGROK_DOMAIN" --log=stdout
+          # 1. Apply credentials
+          echo "Authenticating ngrok..."
+          ngrok config add-authtoken "$NGROK_TOKEN"
+
+          # 2. Start ngrok tunnel using the assigned domain
+          echo "Starting tunnel to port 9119..."
+          ngrok http 9119 --url="$NGROK_DOMAIN" --log=stdout &
+          sleep 6
+
+          # 3. Print active public URL
+          echo "=========================================================="
+          echo "Public URL: https://$NGROK_DOMAIN"
+          echo "Web Inspection: http://127.0.0.1:4040"
+          echo "=========================================================="
+
+          # 4. Stream background agent logs and keep session alive
+          tail -f /tmp/hermes.log
