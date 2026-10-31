@@ -1,0 +1,47 @@
+name: Hermes Agent Service
+
+on:
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+
+jobs:
+  run-hermes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # Terminate cleanly just before GitHub's 360-min hard cut
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python & System Tools
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y psmisc curl wget
+          # Clean up unnecessary toolchains to free disk space (~15GB freed)
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+
+      - name: Install & Configure ngrok
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin
+          ngrok config add-authtoken "$NGROK_TOKEN"
+
+      - name: Launch Hermes Agent
+        run: |
+          # Example Hermes startup command on port 9119
+          # Replace with your actual project start script
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          nohup python main.py --port 9119 > /tmp/hermes.log 2>&1 &
+          sleep 5
+
+      - name: Expose Port 9119 via ngrok & Maintain Session
+        env:
+          NGROK_DOMAIN: "countless-doozy-flashing.ngrok-free.dev"
+        run: |
+          echo "Starting ngrok tunnel on port 9119..."
+          ngrok http 9119 --domain="$NGROK_DOMAIN" --log=stdout
